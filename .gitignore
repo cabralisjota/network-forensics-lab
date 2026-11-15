@@ -7,3 +7,9 @@ forensic_report.json
 
 ids_alerts.json
 __pycache__/
+
+# Generated IDS output
+ids_alerts.json
+ids_incident_report.md
+ids_engine_backup.py
+test_ids_backup.py

@@ -1,64 +1,106 @@
-import json
-import subprocess
-import sys
+import tempfile
+from pathlib import Path
+from scapy.all import IP, TCP, wrpcap
+from ids_engine import analyze
 
-TESTS = [
-    {
-        "pcap": "timed_traffic.pcap",
-        "expected": {"TCP_PORT_SCAN"}
-    },
-    {
-        "pcap": "http.cap",
-        "expected": set()
-    },
-    {
-        "pcap": "ids_test.pcap",
-        "expected": {
-            "TCP_NULL_SCAN",
-            "TCP_SYN_BURST"
-        }
-    }
-]
+BASE = 1700000000.0
 
-passed = 0
-
-print("\n=== IDS AUTOMATED TEST SUITE ===")
-
-for test in TESTS:
-    pcap = test["pcap"]
-
-    result = subprocess.run(
-        [sys.executable, "ids_engine.py", pcap],
-        capture_output=True,
-        text=True
+def packet(src, dst, port, flags, offset, sport=40000):
+    p = IP(src=src, dst=dst) / TCP(
+        sport=sport,
+        dport=port,
+        flags=flags
     )
+    p.time = BASE + offset
+    return p
 
-    if result.returncode != 0:
-        print(f"\n[FAIL] {pcap}")
-        print(result.stderr)
-        continue
+def run_test(name, packets, expected, folder):
+    path = folder / (name + ".pcap")
+    wrpcap(str(path), packets)
 
-    try:
-        with open("ids_alerts.json") as f:
-            alerts = json.load(f)
+    result = analyze(path)
+    actual = {a["rule"] for a in result["alerts"]}
 
-        actual = {alert["rule"] for alert in alerts}
-        expected = test["expected"]
+    passed = actual == expected
+    status = "PASS" if passed else "FAIL"
 
-        if actual == expected and len(alerts) == len(expected):
-            print(f"[PASS] {pcap}: {sorted(actual)}")
-            passed += 1
-        else:
-            print(f"[FAIL] {pcap}")
-            print("Expected:", sorted(expected))
-            print("Actual:", sorted(actual))
-            print("Alert count:", len(alerts))
+    print(f"[{status}] {name}")
+    if not passed:
+        print(" Expected:", sorted(expected))
+        print(" Actual:", sorted(actual))
 
-    except (OSError, ValueError, KeyError) as error:
-        print(f"[FAIL] {pcap}: {error}")
+    return passed
 
-print("\n=== TEST SUMMARY ===")
-print(f"Passed: {passed}/{len(TESTS)}")
+def main():
+    tests = []
 
-if passed != len(TESTS):
-    sys.exit(1)
+    scan = [
+        packet("192.0.2.1", "192.0.2.2",
+               port, "S", i, 40000 + i)
+        for i, port in enumerate([21,22,23,25,80])
+    ]
+    tests.append((
+        "port_scan", scan, {"TCP_PORT_SCAN"}
+    ))
+
+    normal = [
+        packet("192.0.2.3", "192.0.2.4",
+               80, "S", 0),
+        packet("192.0.2.4", "192.0.2.3",
+               40000, "SA", 0.1, 80),
+        packet("192.0.2.3", "192.0.2.4",
+               80, "A", 0.2)
+    ]
+    tests.append(("normal", normal, set()))
+
+    tests.append((
+        "null_scan",
+        [packet("192.0.2.5","192.0.2.6",
+                80, 0, 0)],
+        {"TCP_NULL_SCAN"}
+    ))
+
+    tests.append((
+        "fin_scan",
+        [packet("192.0.2.7","192.0.2.8",
+                80, "F", 0)],
+        {"TCP_FIN_SCAN"}
+    ))
+
+    tests.append((
+        "xmas_scan",
+        [packet("192.0.2.9","192.0.2.10",
+                80, "FPU", 0)],
+        {"TCP_XMAS_SCAN"}
+    ))
+
+    burst = [
+        packet("192.0.2.11","192.0.2.12",
+               443, "S", i * 0.1, 41000 + i)
+        for i in range(110)
+    ]
+    tests.append((
+        "syn_burst", burst, {"TCP_SYN_BURST"}
+    ))
+
+    # Packets intentionally out of timestamp order
+    unordered = list(reversed(scan))
+    tests.append((
+        "unordered_packets",
+        unordered, {"TCP_PORT_SCAN"}
+    ))
+
+    passed = 0
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+
+        for name, packets, expected in tests:
+            if run_test(name, packets, expected, folder):
+                passed += 1
+
+    print(f"\nTests passed: {passed}/{len(tests)}")
+    return passed == len(tests)
+
+if __name__ == "__main__":
+    raise SystemExit(0 if main() else 1)

@@ -155,3 +155,44 @@ All three regression tests passed (3/3).
 - Potential false positives
 - No full TCP session tracking
 - Requires locally available test captures
+
+## IDS Engine v2.0
+
+Offline, rule-based intrusion detection using
+Python and Scapy.
+
+### Detection Capabilities
+
+- TCP port scan detection
+- TCP NULL flag detection
+- TCP FIN-only flag detection
+- TCP Xmas flag detection
+- TCP SYN burst detection
+- Timestamp-ordered packet analysis
+- JSON security alerts
+- Markdown incident reporting
+
+### Run
+
+    python ids_engine.py timed_traffic.pcap
+
+Generate a report:
+
+    python ids_report.py
+
+Run the self-contained tests:
+
+    python test_ids.py
+
+### Testing
+
+Seven synthetic test scenarios cover five
+detection rules, normal traffic, and
+out-of-order packet timestamps.
+
+### Limitations
+
+This is an educational offline IDS.
+Detection rules identify suspicious patterns,
+not confirmed attacks. Thresholds require
+validation before operational use.

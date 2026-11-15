@@ -1,78 +1,103 @@
 from scapy.all import PcapReader, IP, TCP
 from collections import defaultdict, deque
+from datetime import datetime, timezone
+from pathlib import Path
+import argparse
 import json
-import sys
-
-PCAP = sys.argv[1] if len(sys.argv) > 1 else "timed_traffic.pcap"
 
 WINDOW = 60
 PORT_THRESHOLD = 5
 SYN_THRESHOLD = 100
 
-port_history = defaultdict(deque)
-syn_history = defaultdict(deque)
+def iso_time(timestamp):
+    return datetime.fromtimestamp(
+        timestamp, timezone.utc
+    ).isoformat()
 
-alerts = []
-reported = set()
+def analyze(pcap):
+    packets = []
 
-def create_alert(rule, severity, src, dst, details, timestamp):
-    alert = {
-        "rule": rule,
-        "severity": severity,
-        "source_ip": src,
-        "destination_ip": dst,
-        "timestamp": timestamp,
-        "details": details
-    }
+    with PcapReader(str(pcap)) as capture:
+        for number, pkt in enumerate(capture, 1):
+            if IP not in pkt or TCP not in pkt:
+                continue
 
-    alerts.append(alert)
+            tcp = pkt[TCP]
 
-    print(f"\n[{severity}] {rule}")
-    print(f"Source: {src}")
-    print(f"Target: {dst}")
-    print(f"Details: {details}")
+            packets.append({
+                "number": number,
+                "time": float(pkt.time),
+                "src": pkt[IP].src,
+                "dst": pkt[IP].dst,
+                "sport": int(tcp.sport),
+                "dport": int(tcp.dport),
+                "flags": int(tcp.flags)
+            })
 
+    # Sort by capture timestamp
+    packets.sort(key=lambda p: (p["time"], p["number"]))
 
-with PcapReader(PCAP) as capture:
-    for packet in capture:
+    port_history = defaultdict(deque)
+    syn_history = defaultdict(deque)
 
-        if IP not in packet or TCP not in packet:
-            continue
+    alerts = []
+    reported = set()
 
-        ip = packet[IP]
-        tcp = packet[TCP]
+    def add_alert(rule, severity, pkt, evidence):
+        key = (rule, pkt["src"], pkt["dst"])
 
-        src = ip.src
-        dst = ip.dst
-        flags = int(tcp.flags)
-        timestamp = float(packet.time)
+        if key in reported:
+            return
 
+        reported.add(key)
+
+        alerts.append({
+            "rule": rule,
+            "severity": severity,
+            "source_ip": pkt["src"],
+            "destination_ip": pkt["dst"],
+            "timestamp": iso_time(pkt["time"]),
+            "packet_number": pkt["number"],
+            "evidence": evidence
+        })
+
+    for pkt in packets:
+        src = pkt["src"]
+        dst = pkt["dst"]
+        flags = pkt["flags"]
+        timestamp = pkt["time"]
         key = (src, dst)
 
-        # Rule 1: TCP NULL scan pattern
+        # TCP NULL pattern
         if flags == 0:
-            alert_key = ("TCP_NULL_SCAN", key)
+            add_alert(
+                "TCP_NULL_SCAN", "MEDIUM", pkt,
+                {"destination_port": pkt["dport"]}
+            )
 
-            if alert_key not in reported:
-                create_alert(
-                    "TCP_NULL_SCAN",
-                    "MEDIUM",
-                    src, dst,
-                    {"flags": 0, "destination_port": int(tcp.dport)},
-                    timestamp
-                )
-                reported.add(alert_key)
+        # TCP FIN-only pattern
+        if flags == 0x01:
+            add_alert(
+                "TCP_FIN_SCAN", "MEDIUM", pkt,
+                {"destination_port": pkt["dport"]}
+            )
 
-        # Count initial SYN packets only
+        # TCP Xmas pattern: FIN + PSH + URG
+        if flags == 0x29:
+            add_alert(
+                "TCP_XMAS_SCAN", "MEDIUM", pkt,
+                {"destination_port": pkt["dport"]}
+            )
+
+        # Initial SYN, excluding SYN-ACK
         if not (flags & 0x02) or (flags & 0x10):
             continue
 
         port_history[key].append(
-            (timestamp, int(tcp.dport))
+            (timestamp, pkt["dport"])
         )
         syn_history[key].append(timestamp)
 
-        # Remove old observations
         while port_history[key] and (
             timestamp - port_history[key][0][0] > WINDOW
         ):
@@ -83,54 +108,65 @@ with PcapReader(PCAP) as capture:
         ):
             syn_history[key].popleft()
 
-        # Rule 2: Port scan
-        unique_ports = {
+        ports = sorted({
             port for _, port in port_history[key]
-        }
+        })
 
-        alert_key = ("TCP_PORT_SCAN", key)
-
-        if (
-            len(unique_ports) >= PORT_THRESHOLD
-            and alert_key not in reported
-        ):
-            create_alert(
-                "TCP_PORT_SCAN",
-                "MEDIUM",
-                src, dst,
+        if len(ports) >= PORT_THRESHOLD:
+            add_alert(
+                "TCP_PORT_SCAN", "MEDIUM", pkt,
                 {
-                    "unique_ports": len(unique_ports),
-                    "ports": sorted(unique_ports),
+                    "unique_ports": len(ports),
+                    "ports": ports,
                     "window_seconds": WINDOW
-                },
-                timestamp
+                }
             )
-            reported.add(alert_key)
 
-        # Rule 3: SYN burst
-        alert_key = ("TCP_SYN_BURST", key)
-
-        if (
-            len(syn_history[key]) >= SYN_THRESHOLD
-            and alert_key not in reported
-        ):
-            create_alert(
-                "TCP_SYN_BURST",
-                "HIGH",
-                src, dst,
+        if len(syn_history[key]) >= SYN_THRESHOLD:
+            add_alert(
+                "TCP_SYN_BURST", "HIGH", pkt,
                 {
                     "syn_count": len(syn_history[key]),
                     "window_seconds": WINDOW
-                },
-                timestamp
+                }
             )
-            reported.add(alert_key)
+
+    return {
+        "engine": "Network Forensics IDS v2.0",
+        "capture": str(pcap),
+        "tcp_packets_analyzed": len(packets),
+        "alerts_count": len(alerts),
+        "alerts": alerts
+    }
 
 
-with open("ids_alerts.json", "w") as output:
-    json.dump(alerts, output, indent=4)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("pcap", help="Input PCAP file")
+    parser.add_argument(
+        "--output", default="ids_alerts.json"
+    )
+    args = parser.parse_args()
 
-print("\n=== IDS SUMMARY ===")
-print("Capture:", PCAP)
-print("Alerts generated:", len(alerts))
-print("Saved: ids_alerts.json")
+    result = analyze(args.pcap)
+
+    with open(args.output, "w") as f:
+        json.dump(result, f, indent=2)
+
+    print("\n=== NETWORK FORENSICS IDS v2.0 ===")
+    print("Capture:", result["capture"])
+    print("TCP packets:", result["tcp_packets_analyzed"])
+
+    for alert in result["alerts"]:
+        print(
+            f"[{alert['severity']}] {alert['rule']}"
+            f" | {alert['source_ip']}"
+            f" -> {alert['destination_ip']}"
+        )
+
+    print("Total alerts:", result["alerts_count"])
+    print("Saved:", args.output)
+
+
+if __name__ == "__main__":
+    main()
