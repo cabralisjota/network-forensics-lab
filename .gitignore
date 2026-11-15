@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+alerts.json
+forensic_report.json
