@@ -123,3 +123,35 @@ The initial automated test suite passed 3/3 tests:
 
 Use only on owned, authorized, or synthetic
 network captures.
+
+## Intrusion Detection System (IDS v1.0)
+
+Offline network intrusion detection using Python and Scapy.
+
+### Detection Rules
+
+| Rule | Severity | Threshold |
+|------|----------|-----------|
+| TCP_PORT_SCAN | Medium | 5 unique ports in 60 seconds |
+| TCP_NULL_SCAN | Medium | TCP packet with no flags |
+| TCP_SYN_BURST | High | 100 SYN packets in 60 seconds |
+
+### Run the IDS
+
+    python ids_engine.py timed_traffic.pcap
+
+### Run Automated Tests
+
+    python test_ids.py
+
+### Test Results
+
+All three regression tests passed (3/3).
+
+### Limitations
+
+- Offline PCAP analysis only
+- Experimental detection thresholds
+- Potential false positives
+- No full TCP session tracking
+- Requires locally available test captures
