@@ -1,3 +1,98 @@
+<!-- portfolio:start -->
+
+# 🔬 Network Forensics Lab
+
+### Python | Network Security | Packet Analysis
+
+A Python-based cybersecurity laboratory focused
+on offline packet analysis, network traffic
+investigation, and experimental intrusion detection.
+
+## Overview
+
+This project explores how network traffic can be
+examined to identify suspicious activity and support
+security investigations.
+
+## Technical Focus
+
+- Offline packet capture (PCAP) analysis
+- Suspicious network traffic investigation
+- Python-based security analysis
+- Experimental intrusion detection
+- Security findings and reporting
+- Integration experiments with Sentinel 2.0
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["PCAP Files"]
+    B["Python Analysis"]
+    C["Detection Logic"]
+    D["Security Findings"]
+    E["Sentinel 2.0 Integration"]
+
+    A --> B
+    B --> C
+    C --> D
+    D -. "Experimental" .-> E
+```
+
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| Python | Analysis and automation |
+| PCAP | Network traffic evidence |
+| Linux / Termux | Development environment |
+| Git | Version control |
+| Sentinel 2.0 | Experimental dashboard integration |
+
+## Development Roadmap
+
+- [ ] Expand traffic detection rules
+- [ ] Add structured JSON reporting
+- [ ] Improve PCAP analysis workflows
+- [ ] Add sample datasets
+- [ ] Expand Sentinel integration
+- [ ] Add automated tests
+- [ ] Document investigation examples
+
+## Security Research
+
+This project is intended for defensive network
+security research, education, and authorized testing.
+
+
+## Getting Started
+
+Clone the repository:
+
+```bash
+git clone https://github.com/cabralisjota/network-forensics-lab.git
+cd network-forensics-lab
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Developer
+
+**GitHub:** [@cabralisjota](https://github.com/cabralisjota)
+
+**Interests:** Cybersecurity, Python, network
+security, security automation, and IoT.
+
+---
+
+<!-- portfolio:end -->
+
+## Additional Project Documentation
+
 # Network Forensics Lab
 
 A Python-based network forensics toolkit developed
